@@ -14,14 +14,14 @@ import * as dotenv from 'dotenv'
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
 
-// ─── Supabase 接続 ────────────────────────────────────────────
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!   // service_role キー
+  process.env.SUPABASE_SERVICE_KEY!
 )
 
 // ─── CSV列定数（0始まりインデックス）────────────────────────────
-const COL_CATEGORY     = 1   // B列: 分類名称 / ぬいぐるみ判定
+const COL_AK_ABBR      = 0   // A列: 中分類略称 (ｻﾞｯｶ, ﾊｰﾄﾞ, etc.)
+const COL_CATEGORY     = 1   // B列: 分類名称 (アクリルスタンド（キャラ）, フィギュア, etc.) → category_name
 const COL_PRODUCT_NO   = 2   // C列: 商品番号（英数字）
 const COL_TITLE        = 3   // D列: 商品名
 const COL_EDABAN       = 6   // G列: 枝番
@@ -29,18 +29,78 @@ const COL_TANKA_N      = 13  // N列: 税抜単価の分母
 const COL_TANKA_P      = 15  // P列: 税抜単価の分子
 const COL_PRICE        = 19  // T列: 販売価格（税込）
 const COL_PLUSH_SIZE   = 31  // AF列: サイズ記述（ぬいぐるみフラグ判定）
-const COL_AK_CODE      = 36  // AK列: 商品区分コード（取込フィルタ）
+const COL_AK_CODE      = 36  // AK列: 分類コード (AK code: ACST, FG, etc.)
+const COL_GENRE_CODE   = 37  // AL列: ジャンルコード (H133, 7623, etc.) - 棚マッチングに使用
 const COL_PRODUCT_NO3  = 40  // AO列: 商品番号3（9桁数値）
-const COL_AX_CONTENT   = 49  // AX列: コンテンツ名/キャラクター名
+const COL_GENRE_LABEL  = 10  // K列: ジャンル名称 (ワンピース(トレカ), アクリルスタンド小(10cm未満))
+const COL_AX_CONTENT   = 49  // AX列: コンテンツ名/プライスコメント (ワンピース/ウソップ)
+const COL_SIZE_DESC    = 31  // AF列: サイズ記述（NU棚判定用: "約15cm" 等）
 
-// 取込対象の商品区分コード（GASから移植）
-const TARGET_AK_CODES = new Set([
-  'DOAC','ACID','ACMA','ACST','APA','APID','APMA',
-  'COID','COMA','COTT','CRBM','CRIB','DOZA','HAPY',
-  'JEID','JEMA','JEW','NCCO','NU','POID','POMA','POST',
-  'SK08','SQU','ST','STID','STMA','SYOK','TABL','TAID',
-  'TAMA','TRIB','ZAID','ZAMA','ZA','CRAG','TF'
-])
+// ─── 半角カタカナ→全角カタカナ変換 ─────────────────────────────
+const HANKAKU_MAP: Record<string, string> = {
+  'ｦ':'ヲ','ｧ':'ァ','ｨ':'ィ','ｩ':'ゥ','ｪ':'ェ','ｫ':'ォ',
+  'ｬ':'ャ','ｭ':'ュ','ｮ':'ョ','ｯ':'ッ','ｰ':'ー',
+  'ｱ':'ア','ｲ':'イ','ｳ':'ウ','ｴ':'エ','ｵ':'オ',
+  'ｶ':'カ','ｷ':'キ','ｸ':'ク','ｹ':'ケ','ｺ':'コ',
+  'ｻ':'サ','ｼ':'シ','ｽ':'ス','ｾ':'セ','ｿ':'ソ',
+  'ﾀ':'タ','ﾁ':'チ','ﾂ':'ツ','ﾃ':'テ','ﾄ':'ト',
+  'ﾅ':'ナ','ﾆ':'ニ','ﾇ':'ヌ','ﾈ':'ネ','ﾉ':'ノ',
+  'ﾊ':'ハ','ﾋ':'ヒ','ﾌ':'フ','ﾍ':'ヘ','ﾎ':'ホ',
+  'ﾏ':'マ','ﾐ':'ミ','ﾑ':'ム','ﾒ':'メ','ﾓ':'モ',
+  'ﾔ':'ヤ','ﾕ':'ユ','ﾖ':'ヨ',
+  'ﾗ':'ラ','ﾘ':'リ','ﾙ':'ル','ﾚ':'レ','ﾛ':'ロ',
+  'ﾜ':'ワ','ﾝ':'ン',
+  // 濁点・半濁点の組み合わせ
+  'ｶﾞ':'ガ','ｷﾞ':'ギ','ｸﾞ':'グ','ｹﾞ':'ゲ','ｺﾞ':'ゴ',
+  'ｻﾞ':'ザ','ｼﾞ':'ジ','ｽﾞ':'ズ','ｾﾞ':'ゼ','ｿﾞ':'ゾ',
+  'ﾀﾞ':'ダ','ﾁﾞ':'ヂ','ﾂﾞ':'ヅ','ﾃﾞ':'デ','ﾄﾞ':'ド',
+  'ﾊﾞ':'バ','ﾋﾞ':'ビ','ﾌﾞ':'ブ','ﾍﾞ':'ベ','ﾎﾞ':'ボ',
+  'ﾊﾟ':'パ','ﾋﾟ':'ピ','ﾌﾟ':'プ','ﾍﾟ':'ペ','ﾎﾟ':'ポ',
+  'ｳﾞ':'ヴ',
+}
+
+function toFullWidth(str: string): string {
+  if (!str) return str
+  // 濁点・半濁点の組み合わせを先に処理（2文字→1文字）
+  let result = str
+  for (const [h, z] of Object.entries(HANKAKU_MAP)) {
+    if (h.length === 2) result = result.split(h).join(z)
+  }
+  // 単体の半角カタカナを変換
+  for (const [h, z] of Object.entries(HANKAKU_MAP)) {
+    if (h.length === 1) result = result.split(h).join(z)
+  }
+  return result
+}
+
+// ─── content_name 計算 ────────────────────────────────────────
+const STRIP_CODES_IMPORT = new Set(['FG', 'TF', 'NU'])
+const TORECARD_SUFFIXES  = ['（トレカ）', '(トレカ)']
+
+/**
+ * インポート時にコンテンツ名を確定する
+ * 1. genre_name (col49前半) が取れていればそのまま（全コード共通）
+ * 2. FG/TF/NU で genre_label があれば末尾の（トレカ）を除去して使用
+ * 3. その他は genre_label をそのまま
+ */
+/** 空白正規化: 連続空白→1スペース（DB保存用、シリーズ表記は変更しない） */
+function normalizeWS(str: string): string {
+  return str.replace(/[\s　]+/g, ' ').trim()
+}
+
+function computeContentName(akCode: string, genreName: string | null, genreLabel: string | null): string | null {
+  if (genreName) return normalizeWS(genreName)
+  if (genreLabel) {
+    let label = genreLabel
+    if (STRIP_CODES_IMPORT.has(akCode)) {
+      for (const s of TORECARD_SUFFIXES) {
+        if (label.endsWith(s)) { label = label.slice(0, -s.length).trim(); break }
+      }
+    }
+    return normalizeWS(label) || null
+  }
+  return null
+}
 
 // ─── ぬいぐるみフラグ判定 ─────────────────────────────────────
 function calcPlushFlag(category: string, sizeCol: string): number {
@@ -71,11 +131,15 @@ async function main() {
   }
 
   console.log(`読み込み中: ${csvPath}`)
-  const raw = fs.readFileSync(csvPath)
-  const rows: string[][] = parse(raw, {
+
+  // Shift-JIS → UTF-8 デコード
+  const rawBytes = fs.readFileSync(csvPath)
+  const decoder = new TextDecoder('shift-jis')
+  const csvText = decoder.decode(rawBytes)
+
+  const rows: string[][] = parse(csvText, {
     relax_column_count: true,
     skip_empty_lines: true,
-    encoding: 'utf8',
   })
 
   console.log(`総行数: ${rows.length}`)
@@ -85,53 +149,52 @@ async function main() {
 
   for (const row of rows) {
     const akCode = (row[COL_AK_CODE] ?? '').trim()
-    if (!TARGET_AK_CODES.has(akCode)) { skipped++; continue }
+    if (!akCode) { skipped++; continue }
 
     const rawCode = (row[COL_PRODUCT_NO3] ?? '').replace(/\.0$/, '').trim()
     if (!/^\d{9}$/.test(rawCode)) { skipped++; continue }
 
-    // コンテンツ名 / キャラクター名 分割
-    const axRaw = (row[COL_AX_CONTENT] ?? '').trim()
-    let contentName = '', characterName = ''
+    // コンテンツ名 / プライスコメント 分割（col49: "ワンピース/ウソップ"）
+    const axRaw = toFullWidth((row[COL_AX_CONTENT] ?? '').trim())
+    let contentName = '', priceComment = ''
     if (axRaw) {
       const slash = axRaw.indexOf('/')
       if (slash >= 0) {
-        contentName   = axRaw.slice(0, slash).trim()
-        characterName = axRaw.slice(slash + 1).trim()
+        contentName  = axRaw.slice(0, slash).trim()
+        priceComment = axRaw.slice(slash + 1).trim()
       } else {
         contentName = axRaw
       }
     }
 
-    const category = (row[COL_CATEGORY] ?? '').trim()
-    const tankaP   = Number(row[COL_TANKA_P]) || 0
-    const tankaN   = Number(row[COL_TANKA_N]) || 0
+    const akAbbr     = toFullWidth((row[COL_AK_ABBR]     ?? '').trim())   // col0: 中分類略称
+    const category   = toFullWidth((row[COL_CATEGORY]   ?? '').trim())   // col1: 分類名称
+    const genreLabel = toFullWidth((row[COL_GENRE_LABEL] ?? '').trim())  // col10: ジャンル名称
+    const genreCode2 = (row[COL_GENRE_CODE] ?? '').trim()                // col37: ジャンルコード
+    const title      = toFullWidth((row[COL_TITLE]       ?? '').trim())
+    const sizeDesc   = toFullWidth((row[COL_SIZE_DESC]   ?? '').trim())  // col31: サイズ記述
+    const tankaP = Number(row[COL_TANKA_P]) || 0
+    const tankaN = Number(row[COL_TANKA_N]) || 0
     const usedPrice = tankaN !== 0 ? Math.round(tankaP / tankaN) : 0
-
-    // コア列以外は extra JSONB に格納
-    const extra: Record<string, unknown> = {}
-    row.forEach((val, i) => {
-      const skip = new Set([
-        COL_CATEGORY, COL_PRODUCT_NO, COL_TITLE, COL_EDABAN,
-        COL_TANKA_N, COL_TANKA_P, COL_PRICE, COL_PLUSH_SIZE,
-        COL_AK_CODE, COL_PRODUCT_NO3, COL_AX_CONTENT
-      ])
-      if (!skip.has(i) && val !== '') extra[`col_${i}`] = val
-    })
 
     records.push({
       store_id:      storeId,
       product_no:    (row[COL_PRODUCT_NO] ?? '').trim() || null,
       product_no3:   rawCode,
       branch_no:     row[COL_EDABAN] ? Number(row[COL_EDABAN]) || null : null,
-      title:         (row[COL_TITLE] ?? '').trim() || null,
+      title:         title || null,
+      content_name:  computeContentName(akCode, contentName || null, genreLabel || null),
       genre_code:    akCode,
-      genre_name:    contentName || null,    // AXコンテンツ名をジャンル名として仮置き
-      price_comment: characterName || null,
+      genre_code2:   genreCode2 || null,
+      genre_name:    contentName || null,
+      genre_label:   genreLabel || null,
+      price_comment: priceComment || null,
+      category_name: category || null,
+      ak_abbr:       akAbbr || null,
+      size_desc:     sizeDesc || null,
       used_price:    usedPrice || null,
       new_price:     row[COL_PRICE] ? Number(row[COL_PRICE]) || null : null,
-      extra,
-      // plushFlag は extra に保存（shelves マッチング時に参照）
+      extra: {},
     })
   }
 

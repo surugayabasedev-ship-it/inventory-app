@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# 在庫CSVデータ（機密情報のため除外）
+CSV/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

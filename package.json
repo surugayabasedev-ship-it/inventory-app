@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
+    "@tanstack/react-query": "^5.102.7",
     "csv-parse": "^7.0.2",
     "dotenv": "^17.4.2",
     "react": "^19.2.8",
