@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { ContentsAdmin } from '../components/Admin/ContentsAdmin'
+import { ShelvesAdmin } from '../components/Admin/ShelvesAdmin'
 
 type AdminPage = 'contents' | 'shelves'
 
@@ -49,10 +50,5 @@ export function AdminView({ storeCode, page }: Props) {
     return <ContentsAdmin storeId={store.store_id} storeName={store.store_name} storeCode={storeCode} />
   }
 
-  // page === 'shelves' は今後実装
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: '"Noto Sans JP", sans-serif', color: '#64748b' }}>
-      棚割管理は準備中です
-    </div>
-  )
+  return <ShelvesAdmin storeId={store.store_id} storeName={store.store_name} storeCode={storeCode} />
 }
