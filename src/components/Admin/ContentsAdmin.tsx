@@ -14,6 +14,17 @@ interface Content {
 const AREA_TABS = ['すべて', 'キャラクターグッズ', 'フィギュア', 'プラモ', 'トレカ', 'ゲーム', '鉄道/ミニカー/トイ', 'ぬいぐるみ', 'その他・未設定']
 const AREA_OPTIONS = AREA_TABS.slice(1, -1)
 const MAIN_TABS = ['コンテンツ一覧', '新規候補', '新規追加'] as const
+
+// コンテンツマスタが必要なgenre_code（GROUP_A + NU）
+const CONTENTS_GENRE_CODES = [
+  'ZA', 'ZAID', 'ZAMA', 'TAMA', 'TAID', 'TABL', 'SYOK',
+  'STMA', 'STID', 'ST', 'POST', 'POMA', 'POID',
+  'JEW', 'JEMA', 'JEID', 'CRSL', 'COTT', 'COMA', 'COID',
+  'CL', 'APA', 'APID', 'APMA', 'ACST', 'ACMA', 'ACID',
+  'NU',
+]
+
+interface Candidate { name: string; suggestedArea: string }
 type MainTab = typeof MAIN_TABS[number]
 type StatusFilter = 'すべて' | '取扱中' | '取扱外'
 type SortKey = 'content_name' | 'area' | 'is_active'
@@ -52,7 +63,7 @@ interface Props {
 
 export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
   const [contents, setContents] = useState<Content[]>([])
-  const [newCandidates, setNewCandidates] = useState<string[]>([])
+  const [newCandidates, setNewCandidates] = useState<Candidate[]>([])
   const [loading, setLoading] = useState(true)
   const [candidatesLoading, setCandidatesLoading] = useState(false)
   const [mainTab, setMainTab] = useState<MainTab>('コンテンツ一覧')
@@ -88,16 +99,34 @@ export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
 
   async function loadCandidates() {
     setCandidatesLoading(true)
-    // inventoryにあってcontentsマスタにないcontent_name
-    const { data: invData } = await supabase
-      .from('inventory')
-      .select('content_name')
-      .eq('store_id', storeId)
-      .not('content_name', 'is', null)
+    // inventoryにあってcontentsマスタにないcontent_name（GROUP_A+NU対象、全件ページネーション）
+    const PAGE = 1000
+    let offset = 0
+    const seen = new Map<string, string>() // name → suggestedArea
+    while (true) {
+      const { data } = await supabase
+        .from('inventory')
+        .select('content_name, genre_code')
+        .eq('store_id', storeId)
+        .eq('ak_abbr', 'ザッカ')
+        .in('genre_code', CONTENTS_GENRE_CODES)
+        .not('content_name', 'is', null)
+        .range(offset, offset + PAGE - 1)
+      if (!data || data.length === 0) break
+      for (const r of data) {
+        const name = (r.content_name as string | null)?.trim()
+        if (name && !seen.has(name)) {
+          seen.set(name, r.genre_code === 'NU' ? 'ぬいぐるみ' : 'キャラクターグッズ')
+        }
+      }
+      if (data.length < PAGE) break
+      offset += PAGE
+    }
     const masterNames = new Set(contents.map(c => c.content_name))
-    const candidates = [...new Set((invData ?? []).map(r => r.content_name as string))]
-      .filter(name => name && !masterNames.has(name))
-      .sort()
+    const candidates: Candidate[] = [...seen.entries()]
+      .filter(([name]) => !masterNames.has(name))
+      .map(([name, suggestedArea]) => ({ name, suggestedArea }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ja'))
     setNewCandidates(candidates)
     setCandidatesLoading(false)
   }
@@ -127,7 +156,7 @@ export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
     }).select('id, content_name, area, is_active, sort_order').single()
     if (data) {
       setContents(prev => [...prev, data])
-      setNewCandidates(prev => prev.filter(n => n !== targetName))
+      setNewCandidates(prev => prev.filter(c => c.name !== targetName))
     }
     if (!name) { setNewName(''); setNewArea(''); setNewIsActive(null) }
   }
@@ -394,16 +423,15 @@ export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {newCandidates.map(name => (
-                    <CandidateRow key={name} name={name} areaOptions={AREA_OPTIONS} onAdd={(area, isActive) => {
-                      setNewArea(area); setNewIsActive(isActive)
+                  {newCandidates.map(c => (
+                    <CandidateRow key={c.name} name={c.name} suggestedArea={c.suggestedArea} areaOptions={AREA_OPTIONS} onAdd={(area, isActive) => {
                       supabase.from('contents').insert({
-                        store_id: storeId, content_name: name,
+                        store_id: storeId, content_name: c.name,
                         area: area || null, is_active: isActive,
                       }).select('id, content_name, area, is_active, sort_order').single().then(({ data }) => {
                         if (data) {
                           setContents(prev => [...prev, data])
-                          setNewCandidates(prev => prev.filter(n => n !== name))
+                          setNewCandidates(prev => prev.filter(x => x.name !== c.name))
                         }
                       })
                     }} />
@@ -470,13 +498,14 @@ export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
   )
 }
 
-function CandidateRow({ name, areaOptions, onAdd }: {
+function CandidateRow({ name, suggestedArea, areaOptions, onAdd }: {
   name: string
+  suggestedArea: string
   areaOptions: string[]
   onAdd: (area: string, isActive: boolean) => void
 }) {
-  const [area, setArea] = useState('')
-  const [isActive, setIsActive] = useState<boolean | null>(null)
+  const [area, setArea] = useState(suggestedArea)
+  const [isActive, setIsActive] = useState<boolean | null>(true)
   const [added, setAdded] = useState(false)
 
   if (added) return null
