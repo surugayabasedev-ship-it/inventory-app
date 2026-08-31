@@ -79,6 +79,7 @@ export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
   const [newArea, setNewArea] = useState('')
   const [newIsActive, setNewIsActive] = useState<boolean | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const candidateFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { load() }, [storeId])
   useEffect(() => {
@@ -171,6 +172,62 @@ export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
     const wb = XLSXUtils.book_new()
     XLSXUtils.book_append_sheet(wb, ws, 'コンテンツ一覧')
     XLSXWriteFile(wb, `コンテンツ一覧_${storeName}.xlsx`)
+  }
+
+  function exportCandidatesXlsx() {
+    const rows = newCandidates.map(c => ({
+      コンテンツ名: c.name,
+      エリア: c.suggestedArea,
+      取扱状態: '',
+    }))
+    const ws = XLSXUtils.json_to_sheet(rows)
+    const wb = XLSXUtils.book_new()
+    XLSXUtils.book_append_sheet(wb, ws, '新規候補')
+    XLSXWriteFile(wb, `新規候補_${storeName}.xlsx`)
+  }
+
+  async function importCandidatesXlsx(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const buf = await file.arrayBuffer()
+    const wb = XLSXRead(buf)
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    const rows: { コンテンツ名?: string; エリア?: string; 取扱状態?: string }[] = XLSXUtils.sheet_to_json(ws)
+
+    const masterNames = new Set(contents.map(c => c.content_name))
+    const toInsert: { store_id: string; content_name: string; area: string | null; is_active: boolean }[] = []
+    for (const row of rows) {
+      const name = String(row['コンテンツ名'] ?? '').trim()
+      if (!name) continue
+      const status = String(row['取扱状態'] ?? '').trim()
+      if (!status) continue
+      if (masterNames.has(name)) continue
+      toInsert.push({
+        store_id: storeId,
+        content_name: name,
+        area: String(row['エリア'] ?? '').trim() || null,
+        is_active: status !== '取扱外',
+      })
+    }
+
+    if (toInsert.length === 0) {
+      alert('登録対象がありません（取扱状態が空の行はスキップされます）')
+      if (candidateFileRef.current) candidateFileRef.current.value = ''
+      return
+    }
+
+    const BATCH = 200
+    const inserted: Content[] = []
+    for (let i = 0; i < toInsert.length; i += BATCH) {
+      const { data } = await supabase.from('contents').insert(toInsert.slice(i, i + BATCH))
+        .select('id, content_name, area, is_active, sort_order')
+      if (data) inserted.push(...(data as Content[]))
+    }
+    const insertedNames = new Set(inserted.map(c => c.content_name))
+    setContents(prev => [...prev, ...inserted])
+    setNewCandidates(prev => prev.filter(c => !insertedNames.has(c.name)))
+    alert(`${inserted.length}件を登録しました`)
+    if (candidateFileRef.current) candidateFileRef.current.value = ''
   }
 
   async function importXlsx(e: React.ChangeEvent<HTMLInputElement>) {
@@ -404,9 +461,18 @@ export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
       {/* ─── 新規候補 ─── */}
       {mainTab === '新規候補' && (
         <div style={{ padding: '20px 24px' }}>
-          <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>
-            在庫データに存在するが、コンテンツマスタに未登録のコンテンツです。取扱可否を確認してマスタに追加してください。
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <p style={{ fontSize: 13, color: '#64748b', margin: 0, flex: 1 }}>
+              在庫データに存在するが、コンテンツマスタに未登録のコンテンツです。取扱可否を確認してマスタに追加してください。
+            </p>
+            {newCandidates.length > 0 && (
+              <button onClick={exportCandidatesXlsx} style={btnStyle('#64748b', '#fff')}>Excel出力</button>
+            )}
+            <label style={{ ...btnStyle('#2563eb', '#fff'), cursor: 'pointer' }}>
+              Excelインポート
+              <input ref={candidateFileRef} type="file" accept=".xlsx" onChange={importCandidatesXlsx} style={{ display: 'none' }} />
+            </label>
+          </div>
           {candidatesLoading ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>読み込み中...</div>
           ) : newCandidates.length === 0 ? (
