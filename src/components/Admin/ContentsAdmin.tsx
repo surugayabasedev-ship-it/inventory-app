@@ -173,15 +173,20 @@ export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
     else { setSortKey(key); setSortDir('asc') }
   }
 
-  const filtered = contents
+  // ステータスフィルタを除いた基底フィルタ（カウント表示用）
+  const baseFiltered = contents.filter(c => {
+    if (nameFilter && !c.content_name.toLowerCase().includes(nameFilter.toLowerCase())) return false
+    if (initialFilter && !matchesInitial(c.content_name, initialFilter)) return false
+    if (areaTab === 'すべて') return true
+    if (areaTab === 'その他・未設定') return !c.area || !AREA_OPTIONS.includes(c.area)
+    return c.area === areaTab
+  })
+
+  const filtered = baseFiltered
     .filter(c => {
-      if (nameFilter && !c.content_name.toLowerCase().includes(nameFilter.toLowerCase())) return false
-      if (initialFilter && !matchesInitial(c.content_name, initialFilter)) return false
       if (statusFilter === '取扱中' && !c.is_active) return false
       if (statusFilter === '取扱外' && c.is_active) return false
-      if (areaTab === 'すべて') return true
-      if (areaTab === 'その他・未設定') return !c.area || !AREA_OPTIONS.includes(c.area)
-      return c.area === areaTab
+      return true
     })
     .sort((a, b) => {
       let av: string, bv: string
@@ -192,8 +197,8 @@ export function ContentsAdmin({ storeId, storeName, storeCode }: Props) {
       return sortDir === 'asc' ? cmp : -cmp
     })
 
-  const activeCount = filtered.filter(c => c.is_active).length
-  const inactiveCount = filtered.filter(c => !c.is_active).length
+  const activeCount = baseFiltered.filter(c => c.is_active).length
+  const inactiveCount = baseFiltered.filter(c => !c.is_active).length
 
   return (
     <AdminLayout storeName={storeName} storeCode={storeCode} currentPage="contents">

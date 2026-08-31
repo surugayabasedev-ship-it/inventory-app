@@ -96,13 +96,19 @@ async function main() {
   for (const s of shelves ?? []) shelfNoToId.set(s.shelf_no, s.shelf_id)
   console.log(`棚 ${shelfNoToId.size}件 取得`)
 
-  // 既存コンテンツ・shelf_contentsを削除
-  console.log('既存コンテンツデータ削除中...')
+  // 既存コンテンツの is_active を保存してから削除
+  console.log('既存コンテンツデータ取得中...')
   const { data: existingContents } = await supabase
     .from('contents')
-    .select('id')
+    .select('id, content_name, area, is_active')
     .eq('store_id', storeId)
   const existingContentIds = (existingContents ?? []).map(c => c.id)
+
+  // content_name__area → is_active のマップ（再インポート時に取扱外設定を保持）
+  const existingActiveMap = new Map<string, boolean>()
+  for (const c of existingContents ?? []) {
+    existingActiveMap.set(`${c.content_name}__${c.area ?? ''}`, c.is_active)
+  }
 
   const DEL_BATCH = 100
   for (let i = 0; i < existingContentIds.length; i += DEL_BATCH) {
@@ -111,14 +117,14 @@ async function main() {
   await supabase.from('contents').delete().eq('store_id', storeId)
   console.log(`既存コンテンツ ${existingContentIds.length}件 削除完了`)
 
-  // contentsをINSERT
+  // contentsをINSERT（既存の is_active を引き継ぎ、新規は true）
   const INS_BATCH = 200
   let insertedContents = 0
   const contentRecords = contentRows.map((cr, i) => ({
     store_id: storeId,
     content_name: cr.name,
     area: cr.area,
-    is_active: true,
+    is_active: existingActiveMap.get(`${cr.name}__${cr.area}`) ?? true,
     sort_order: i,
   }))
 
