@@ -11,7 +11,7 @@ interface Content {
   sort_order: number | null
 }
 
-const AREA_TABS = ['すべて', 'キャラクターグッズ', 'フィギュアコーナー', 'ぬいぐるみコーナー', 'その他・未設定']
+const AREA_TABS = ['すべて', 'キャラクターグッズ', 'フィギュア', 'プラモ', 'トレカ', 'ゲーム', '鉄道/ミニカー/トイ', 'ぬいぐるみ', 'その他・未設定']
 const AREA_OPTIONS = AREA_TABS.slice(1, -1)
 const MAIN_TABS = ['コンテンツ一覧', '新規候補', '新規追加'] as const
 type MainTab = typeof MAIN_TABS[number]
