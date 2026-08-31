@@ -43,5 +43,5 @@ export function StaffView({ storeCode }: Props) {
     </div>
   )
 
-  return <SortingView storeId={store.store_id} storeName={store.store_name} />
+  return <SortingView storeId={store.store_id} storeName={store.store_name} storeCode={storeCode} />
 }
