@@ -108,7 +108,7 @@ export function useInventorySearch(storeId: string) {
 
         const { data, error } = await supabase
           .from('inventory')
-          .select('product_no3, product_no, title, content_name, genre_name, genre_label, price_comment, genre_code, genre_code2, category_name, ak_abbr, size_desc')
+          .select('product_no3, product_no, title, content_name, genre_name, genre_label, price_comment, genre_code, genre_code2, category_name, ak_abbr, size_desc, used_price, branch_no')
           .eq('store_id', storeId)
           .eq(searchField, code)
           .limit(1)
@@ -147,7 +147,7 @@ export function useInventorySearch(storeId: string) {
         // genre_name=コンテンツ名, genre_label=ジャンル名称("ワンピース(トレカ)"等), price_comment=プライスコメント
         const { data, error } = await supabase
           .from('inventory')
-          .select('product_no3, product_no, title, content_name, genre_name, genre_label, price_comment, genre_code, genre_code2, category_name, ak_abbr, size_desc')
+          .select('product_no3, product_no, title, content_name, genre_name, genre_label, price_comment, genre_code, genre_code2, category_name, ak_abbr, size_desc, used_price, branch_no')
           .eq('store_id', storeId)
           .eq('ak_abbr', 'ザッカ')
           .or(`content_name.ilike.%${q}%,genre_name.ilike.%${q}%,genre_label.ilike.%${q}%,price_comment.ilike.%${q}%`)
