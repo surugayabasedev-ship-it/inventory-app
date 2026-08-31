@@ -123,7 +123,7 @@ export function ShelvesAdmin({ storeId, storeName, storeCode }: Props) {
           .from('shelf_contents')
           .select('id, shelf_id, content_id, is_catch_all, display_order, contents(content_name, area)')
           .in('shelf_id', ids.slice(i, i + 100))
-        for (const row of data ?? []) allSc.push(row as ShelfContent)
+        for (const row of data ?? []) allSc.push(row as unknown as ShelfContent)
       }
       const map = new Map<string, ShelfContent[]>()
       for (const sc of allSc) {
@@ -220,7 +220,7 @@ export function ShelvesAdmin({ storeId, storeName, storeCode }: Props) {
     if (error || !data) return
     setScMap(prev => {
       const next = new Map(prev)
-      next.set(selected.shelf_id, [...(next.get(selected.shelf_id) ?? []), data as ShelfContent])
+      next.set(selected.shelf_id, [...(next.get(selected.shelf_id) ?? []), data as unknown as ShelfContent])
       return next
     })
     setContentSearch('')

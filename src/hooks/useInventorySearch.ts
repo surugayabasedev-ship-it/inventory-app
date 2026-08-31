@@ -189,7 +189,7 @@ export function useInventorySearch(storeId: string) {
         const items: InventoryItem[] = [
           ...groupAItems.map(it => {
             const name = it.content_name ?? it.genre_name ?? null
-            return { ...it, shelves: (name && contentNameShelves.get(name)) ?? [] }
+            return { ...it, shelves: name ? (contentNameShelves.get(name) ?? []) : [] }
           }),
           ...otherItems.map(it => ({ ...it, shelves: categoryShelvesAll })),
         ]
