@@ -25,3 +25,4 @@ CSV/
 *.njsproj
 *.sln
 *.sw?
+.vercel

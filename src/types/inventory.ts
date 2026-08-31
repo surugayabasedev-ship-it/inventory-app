@@ -17,5 +17,26 @@ export interface InventoryItem {
   category_name: string | null // 分類名称（col1: フィギュア, アクリルスタンド（キャラ）等）
   ak_abbr: string | null       // 中分類略称（col0: ザッカ等）
   size_desc: string | null     // サイズ記述（col31: NU棚判定用）
+  used_price: number | null    // 税抜単価（tanka_p / tanka_n）
+  branch_no: number | null     // 枝番
   shelves: ShelfInfo[]
+}
+
+// ─── 買戻し関連 ────────────────────────────────────────────────
+
+export interface BuybackItem {
+  id: string                   // UUID（重複防止キー）
+  product_no3: string | null
+  product_no: string | null
+  title: string | null
+  content_name: string | null
+  used_price: number | null    // 税抜単価
+  branch_no: number | null     // 枝番
+}
+
+export interface BuybackBatch {
+  id: string
+  label: string                // yyyymmddhhmm（ファイル名用）
+  moved_at: string             // ISO datetime
+  items: BuybackItem[]
 }
