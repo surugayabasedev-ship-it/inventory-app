@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { normalizeBarcode } from '../lib/barcode'
-import { getSearchGroupKey } from '../lib/inventoryRouting'
+import { GROUP_A, getSearchGroupKey, getShelfRoute } from '../lib/inventoryRouting'
 import type { InventoryItem, ShelfInfo } from '../types/inventory'
 
 export type SearchMode = 'barcode' | 'product_no' | 'content_name'
@@ -13,7 +13,8 @@ export interface SearchResult {
   query: string
 }
 
-async function fetchShelves(storeId: string, genreCodes: string[]): Promise<ShelfInfo[]> {
+// genre_code ベースの棚取得（shelf_categories 経由、TF/NU/その他向け）
+async function fetchShelvesByGenreCode(storeId: string, genreCodes: string[]): Promise<ShelfInfo[]> {
   if (!genreCodes.length) return []
   const { data } = await supabase
     .from('shelf_categories')
@@ -22,6 +23,52 @@ async function fetchShelves(storeId: string, genreCodes: string[]): Promise<Shel
     .eq('shelves.store_id', storeId)
   if (!data) return []
   return (data as any[]).flatMap(d => d.shelves ?? [])
+}
+
+// コンテンツ名ベースの棚取得（contents → shelf_contents → shelves、GROUP_A向け）
+async function fetchShelvesByContentNames(
+  storeId: string,
+  contentNames: string[]
+): Promise<Map<string, ShelfInfo[]>> {
+  if (!contentNames.length) return new Map()
+
+  const { data: contentsData } = await supabase
+    .from('contents')
+    .select('id, content_name')
+    .eq('store_id', storeId)
+    .in('content_name', contentNames)
+  if (!contentsData || contentsData.length === 0) return new Map()
+
+  const contentIds = contentsData.map(c => c.id)
+  const idToName = new Map(contentsData.map(c => [c.id, c.content_name as string]))
+
+  const { data: scData } = await supabase
+    .from('shelf_contents')
+    .select('content_id, shelf_id')
+    .in('content_id', contentIds)
+  if (!scData || scData.length === 0) return new Map()
+
+  const shelfIds = [...new Set(scData.map(sc => sc.shelf_id))]
+
+  const { data: shelvesData } = await supabase
+    .from('shelves')
+    .select('shelf_id, shelf_no, x, y')
+    .in('shelf_id', shelfIds)
+    .eq('store_id', storeId)
+  if (!shelvesData) return new Map()
+
+  const shelfById = new Map(shelvesData.map(s => [s.shelf_id, s as ShelfInfo & { shelf_id: string }]))
+
+  const result = new Map<string, ShelfInfo[]>()
+  for (const sc of scData) {
+    const name = idToName.get(sc.content_id)
+    const shelf = shelfById.get(sc.shelf_id)
+    if (!name || !shelf) continue
+    const arr = result.get(name) ?? []
+    arr.push({ shelf_no: shelf.shelf_no, x: shelf.x, y: shelf.y })
+    result.set(name, arr)
+  }
+  return result
 }
 
 export function useInventorySearch(storeId: string) {
@@ -72,10 +119,22 @@ export function useInventorySearch(storeId: string) {
           return
         }
 
-        const item = data[0]
-        // ジャンルコード(genre_code2)→棚マッチング、なければ分類コード(genre_code)
-        const matchCode = item.genre_code2 || item.genre_code
-        const shelves = await fetchShelves(storeId, matchCode ? [matchCode] : [])
+        const item = data[0] as InventoryItem
+        const route = getShelfRoute(item)
+        let shelves: ShelfInfo[] = []
+
+        if (route.type === 'content') {
+          // GROUP_A / NU コンテンツ棚: contents → shelf_contents → shelves で引く
+          const contentName = item.content_name ?? item.genre_name ?? null
+          if (contentName) {
+            const shelvesMap = await fetchShelvesByContentNames(storeId, [contentName])
+            shelves = shelvesMap.get(contentName) ?? []
+          }
+        } else {
+          // TF / category: genre_code で shelf_categories 経由
+          const matchCode = item.genre_code2 || item.genre_code
+          shelves = await fetchShelvesByGenreCode(storeId, matchCode ? [matchCode] : [])
+        }
 
         setResult({
           status: shelves.length > 0 ? 'found' : 'no_shelf',
@@ -100,23 +159,44 @@ export function useInventorySearch(storeId: string) {
           return
         }
 
-        // content_name × 種別(getContentTypeName)でグループ化
-        const byGenre = new Map<string, typeof data[0]>()
-        for (const row of data) {
-          const key = getSearchGroupKey(row as InventoryItem)
-          if (!byGenre.has(key)) byGenre.set(key, row)
+        // content_name × 種別でグループ化
+        const byGroup = new Map<string, InventoryItem>()
+        for (const row of data as InventoryItem[]) {
+          const key = getSearchGroupKey(row)
+          if (!byGroup.has(key)) byGroup.set(key, row)
         }
 
-        const genreCodes = [...byGenre.keys()]
-        const shelves = await fetchShelves(storeId, genreCodes)
-        // 簡易: 全shelvesを各アイテムに割り当て（棚未実装中の暫定）
-        const items: InventoryItem[] = [...byGenre.entries()].map(([, row]) => ({
-          ...row,
-          shelves: shelves,
-        }))
+        // GROUP_A と それ以外 に分離
+        const groupAItems: InventoryItem[] = []
+        const otherItems: InventoryItem[] = []
+        for (const row of byGroup.values()) {
+          if (GROUP_A.has(row.genre_code ?? '')) groupAItems.push(row)
+          else otherItems.push(row)
+        }
 
+        // GROUP_A: contents → shelf_contents → shelves で取得
+        const groupANames = [...new Set(
+          groupAItems.map(it => it.content_name ?? it.genre_name).filter(Boolean) as string[]
+        )]
+        const contentNameShelves = await fetchShelvesByContentNames(storeId, groupANames)
+
+        // その他: genre_code 経由（TF/NU/フィギュア等、shelf_categories がある場合）
+        const otherCodes = [...new Set(
+          otherItems.map(it => it.genre_code2 || it.genre_code).filter(Boolean) as string[]
+        )]
+        const categoryShelvesAll = await fetchShelvesByGenreCode(storeId, otherCodes)
+
+        const items: InventoryItem[] = [
+          ...groupAItems.map(it => {
+            const name = it.content_name ?? it.genre_name ?? null
+            return { ...it, shelves: (name && contentNameShelves.get(name)) ?? [] }
+          }),
+          ...otherItems.map(it => ({ ...it, shelves: categoryShelvesAll })),
+        ]
+
+        const anyShelf = items.some(it => it.shelves.length > 0)
         setResult({
-          status: items.length > 0 ? (shelves.length > 0 ? 'found' : 'no_shelf') : 'not_found',
+          status: items.length > 0 ? (anyShelf ? 'found' : 'no_shelf') : 'not_found',
           items,
           query: q,
         })
