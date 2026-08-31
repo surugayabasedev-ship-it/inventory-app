@@ -505,7 +505,7 @@ function CandidateRow({ name, suggestedArea, areaOptions, onAdd }: {
   onAdd: (area: string, isActive: boolean) => void
 }) {
   const [area, setArea] = useState(suggestedArea)
-  const [isActive, setIsActive] = useState<boolean | null>(true)
+  const [isActive, setIsActive] = useState<boolean | null>(null)
   const [added, setAdded] = useState(false)
 
   if (added) return null
