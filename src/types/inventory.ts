@@ -20,6 +20,7 @@ export interface InventoryItem {
   used_price: number | null    // 税抜単価（tanka_p / tanka_n）
   branch_no: number | null     // 枝番
   shelves: ShelfInfo[]
+  contentStatus?: 'found' | 'no_shelf' | 'inactive' | 'unregistered'
 }
 
 // ─── 買戻し関連 ────────────────────────────────────────────────

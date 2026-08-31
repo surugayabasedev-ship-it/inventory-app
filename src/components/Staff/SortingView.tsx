@@ -288,7 +288,13 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 16, fontWeight: 700, color: '#1e293b' }}>{getSearchDisplayName(it)}</div>
                       <div style={{ fontSize: 13, color: '#475569', marginTop: 1, fontWeight: 600 }}>{getContentTypeName(it)}</div>
-                      {it.shelves.length === 0 && (
+                      {it.contentStatus === 'unregistered' && (
+                        <div style={{ fontSize: 12, color: '#7c3aed', marginTop: 2, fontWeight: 700 }}>取扱未登録（新規候補へ）</div>
+                      )}
+                      {it.contentStatus === 'inactive' && (
+                        <div style={{ fontSize: 12, color: '#dc2626', marginTop: 2, fontWeight: 700 }}>取扱外</div>
+                      )}
+                      {it.contentStatus === 'no_shelf' && (
                         <div style={{ fontSize: 12, color: '#f97316', marginTop: 2 }}>棚未設定</div>
                       )}
                     </div>

@@ -25,28 +25,41 @@ async function fetchShelvesByGenreCode(storeId: string, genreCodes: string[]): P
   return (data as any[]).flatMap(d => d.shelves ?? [])
 }
 
+interface ContentInfo {
+  is_active: boolean
+  shelves: ShelfInfo[]
+}
+
 // コンテンツ名ベースの棚取得（contents → shelf_contents → shelves、GROUP_A向け）
+// is_active と棚情報を返す。Map にないキー = contents テーブルに未登録
 async function fetchShelvesByContentNames(
   storeId: string,
   contentNames: string[]
-): Promise<Map<string, ShelfInfo[]>> {
+): Promise<Map<string, ContentInfo>> {
   if (!contentNames.length) return new Map()
 
   const { data: contentsData } = await supabase
     .from('contents')
-    .select('id, content_name')
+    .select('id, content_name, is_active')
     .eq('store_id', storeId)
     .in('content_name', contentNames)
   if (!contentsData || contentsData.length === 0) return new Map()
 
   const contentIds = contentsData.map(c => c.id)
   const idToName = new Map(contentsData.map(c => [c.id, c.content_name as string]))
+  const nameToActive = new Map(contentsData.map(c => [c.content_name as string, c.is_active as boolean]))
+
+  // 初期値: 登録済みだが棚なし
+  const result = new Map<string, ContentInfo>()
+  for (const c of contentsData) {
+    result.set(c.content_name as string, { is_active: c.is_active, shelves: [] })
+  }
 
   const { data: scData } = await supabase
     .from('shelf_contents')
     .select('content_id, shelf_id')
     .in('content_id', contentIds)
-  if (!scData || scData.length === 0) return new Map()
+  if (!scData || scData.length === 0) return result
 
   const shelfIds = [...new Set(scData.map(sc => sc.shelf_id))]
 
@@ -55,19 +68,19 @@ async function fetchShelvesByContentNames(
     .select('shelf_id, shelf_no, x, y')
     .in('shelf_id', shelfIds)
     .eq('store_id', storeId)
-  if (!shelvesData) return new Map()
+  if (!shelvesData) return result
 
   const shelfById = new Map(shelvesData.map(s => [s.shelf_id, s as ShelfInfo & { shelf_id: string }]))
 
-  const result = new Map<string, ShelfInfo[]>()
   for (const sc of scData) {
     const name = idToName.get(sc.content_id)
     const shelf = shelfById.get(sc.shelf_id)
     if (!name || !shelf) continue
-    const arr = result.get(name) ?? []
-    arr.push({ shelf_no: shelf.shelf_no, x: shelf.x, y: shelf.y })
-    result.set(name, arr)
+    const info = result.get(name)!
+    info.shelves.push({ shelf_no: shelf.shelf_no, x: shelf.x, y: shelf.y })
   }
+
+  void nameToActive // suppress unused warning
   return result
 }
 
@@ -123,12 +136,15 @@ export function useInventorySearch(storeId: string) {
         const route = getShelfRoute(item)
         let shelves: ShelfInfo[] = []
 
+        let contentStatus: InventoryItem['contentStatus']
         if (route.type === 'content') {
           // GROUP_A / NU コンテンツ棚: contents → shelf_contents → shelves で引く
           const contentName = item.content_name ?? item.genre_name ?? null
           if (contentName) {
-            const shelvesMap = await fetchShelvesByContentNames(storeId, [contentName])
-            shelves = shelvesMap.get(contentName) ?? []
+            const infoMap = await fetchShelvesByContentNames(storeId, [contentName])
+            const info = infoMap.get(contentName)
+            shelves = info?.shelves ?? []
+            contentStatus = !info ? 'unregistered' : !info.is_active ? 'inactive' : shelves.length > 0 ? 'found' : 'no_shelf'
           }
         } else {
           // TF / category: genre_code で shelf_categories 経由
@@ -138,7 +154,7 @@ export function useInventorySearch(storeId: string) {
 
         setResult({
           status: shelves.length > 0 ? 'found' : 'no_shelf',
-          items: [{ ...item, shelves }],
+          items: [{ ...item, shelves, contentStatus }],
           query: q,
         })
 
@@ -189,7 +205,13 @@ export function useInventorySearch(storeId: string) {
         const items: InventoryItem[] = [
           ...groupAItems.map(it => {
             const name = it.content_name ?? it.genre_name ?? null
-            return { ...it, shelves: name ? (contentNameShelves.get(name) ?? []) : [] }
+            const info = name ? contentNameShelves.get(name) : undefined
+            const shelves = info?.shelves ?? []
+            const contentStatus: InventoryItem['contentStatus'] =
+              !info ? 'unregistered' :
+              !info.is_active ? 'inactive' :
+              shelves.length > 0 ? 'found' : 'no_shelf'
+            return { ...it, shelves, contentStatus }
           }),
           ...otherItems.map(it => ({ ...it, shelves: categoryShelvesAll })),
         ]
