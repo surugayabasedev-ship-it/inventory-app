@@ -12,13 +12,6 @@ interface Props {
   onClearBuyback: (ids: string[]) => void
 }
 
-interface HistoryEntry {
-  query: string
-  label: string
-  shelfNo: number | null
-  status: 'found' | 'not_found' | 'out_of_scope' | 'no_shelf'
-}
-
 const MODES: { key: SearchMode; label: string }[] = [
   { key: 'barcode',      label: 'バーコード' },
   { key: 'product_no',   label: '商品番号'   },
@@ -37,10 +30,15 @@ function makeBuybackItem(it: InventoryItem): BuybackItem {
   }
 }
 
+// 商品番号の完成パターン: 9桁数字 or 英字1-3文字 + 数字5-8桁
+function isCompleteProductNo(val: string): boolean {
+  return /^\d{9}$/.test(val) || /^[A-Za-z]{1,3}\d{5,8}$/.test(val)
+}
+
 export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyback, onClearBuyback }: Props) {
   const [mode, setMode] = useState<SearchMode>('barcode')
   const [input, setInput] = useState('')
-  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [scanHistory, setScanHistory] = useState<InventoryItem[]>([])
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
   const inputRef = useRef<HTMLInputElement>(null)
   const { result, loading, search, clear } = useInventorySearch(storeId)
@@ -59,6 +57,9 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
     if (mode === 'barcode' && isTriggerBarcode(val)) {
       handleSearch(val)
       setTimeout(() => setInput(''), 200)
+    } else if (mode === 'product_no' && isCompleteProductNo(val)) {
+      handleSearch(val)
+      setTimeout(() => setInput(''), 200)
     }
   }, [mode, handleSearch])
 
@@ -69,16 +70,18 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
     }
   }, [input, handleSearch, mode])
 
+  // スキャン結果 → 履歴先頭に追加 + 取扱外は自動でpendingBuybackへ
   useEffect(() => {
     if (!result) return
     const item = result.items[0]
-    const entry: HistoryEntry = {
-      query: result.query,
-      label: item ? getContentName(item) : result.query,
-      shelfNo: item?.shelves[0]?.shelf_no ?? null,
-      status: result.status,
+
+    if (mode !== 'content_name' && item) {
+      setScanHistory(prev => [item, ...prev].slice(0, 50))
+      if (result.status === 'no_shelf') {
+        onAddBuyback(makeBuybackItem(item))
+      }
     }
-    setHistory(prev => [entry, ...prev].slice(0, 12))
+
     if (mode !== 'content_name') {
       setTimeout(() => inputRef.current?.focus(), 100)
     }
@@ -91,9 +94,13 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
-  const addToBuyback = (it: InventoryItem) => {
-    onAddBuyback(makeBuybackItem(it))
-  }
+  const pendingIds = new Set(pendingBuyback.map(i => i.id))
+
+  const pendingInHistory = scanHistory
+    .map(it => it.product_no3 ?? it.product_no ?? '')
+    .filter(id => pendingIds.has(id))
+
+  const actionCount = checkedIds.size > 0 ? checkedIds.size : pendingBuyback.length
 
   const handleMove = () => {
     const ids = checkedIds.size > 0 ? [...checkedIds] : pendingBuyback.map(i => i.id)
@@ -116,8 +123,11 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
   }
 
   const toggleAll = () => {
-    if (checkedIds.size === pendingBuyback.length) setCheckedIds(new Set())
-    else setCheckedIds(new Set(pendingBuyback.map(i => i.id)))
+    if (checkedIds.size === pendingInHistory.length && pendingInHistory.length > 0) {
+      setCheckedIds(new Set())
+    } else {
+      setCheckedIds(new Set(pendingInHistory))
+    }
   }
 
   const statusStyle = (() => {
@@ -133,15 +143,11 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
   const item = result?.items[0]
   const shelf = item?.shelves[0]
 
-  const pendingIds = new Set(pendingBuyback.map(i => i.id))
-  const actionCount = checkedIds.size > 0 ? checkedIds.size : pendingBuyback.length
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 
       {/* モードタブ + 入力エリア */}
       <div style={{ background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', flexShrink: 0 }}>
-        {/* モードタブ */}
         <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0' }}>
           {MODES.map(m => (
             <button
@@ -161,7 +167,6 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
           ))}
         </div>
 
-        {/* 入力 */}
         <div style={{ padding: '12px 16px', display: 'flex', gap: 10 }}>
           <input
             ref={inputRef}
@@ -180,9 +185,9 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
             }}
             autoComplete="off" autoCorrect="off" spellCheck={false}
           />
-          {mode !== 'barcode' && (
+          {mode === 'content_name' && (
             <button
-              onClick={() => { handleSearch(input); if (mode !== 'content_name') setInput('') }}
+              onClick={() => handleSearch(input)}
               style={{
                 padding: '12px 20px', background: '#1a2332', color: '#fff',
                 border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 700,
@@ -198,6 +203,11 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
             スキャンすると自動的に検索します
           </p>
         )}
+        {mode === 'product_no' && (
+          <p style={{ margin: '-4px 16px 10px', fontSize: 12, color: '#94a3b8' }}>
+            入力完了で自動検索（Enterでも検索可）
+          </p>
+        )}
       </div>
 
       {/* 結果 + リスト */}
@@ -207,7 +217,7 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
           <div style={{ textAlign: 'center', padding: 30, color: '#94a3b8', fontSize: 17 }}>検索中...</div>
         )}
 
-        {/* バーコード・商品番号モード結果 */}
+        {/* バーコード・商品番号モード: 直近スキャン結果 */}
         {!loading && result && mode !== 'content_name' && statusStyle && (
           <div style={{
             background: statusStyle.bg, border: `3px solid ${statusStyle.border}`,
@@ -232,21 +242,9 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
                 <div style={{ fontSize: 24, fontWeight: 900, color: statusStyle.text }}>棚未設定</div>
                 <div style={{ fontSize: 17, color: '#1e293b', marginTop: 8 }}>{getContentName(item)}</div>
                 <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>→ {getShelfRouteLabel(item)}</div>
-                {!pendingIds.has(item.product_no3 ?? item.product_no ?? '') && (
-                  <button
-                    onClick={() => addToBuyback(item)}
-                    style={{
-                      marginTop: 14, padding: '8px 20px', background: '#f97316', color: '#fff',
-                      border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700,
-                      cursor: 'pointer', fontFamily: 'inherit',
-                    }}
-                  >
-                    取扱外リストへ追加
-                  </button>
-                )}
-                {pendingIds.has(item.product_no3 ?? item.product_no ?? '') && (
-                  <div style={{ marginTop: 12, fontSize: 13, color: '#f97316', fontWeight: 600 }}>✔ リストに追加済み</div>
-                )}
+                <div style={{ marginTop: 10, fontSize: 13, color: '#f97316', fontWeight: 600 }}>
+                  ✔ 取扱外リストへ自動追加
+                </div>
               </>
             ) : (
               <>
@@ -301,108 +299,115 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
           </div>
         )}
 
-        {/* 取扱外リスト */}
-        {pendingBuyback.length > 0 && (
-          <div style={{
-            background: '#fff', border: '2px solid #fed7aa', borderRadius: 10, overflow: 'hidden',
-          }}>
+        {/* スキャン履歴リスト（取扱内 + 取扱外 統合表示） */}
+        {scanHistory.length > 0 && (
+          <div style={{ background: '#fff', border: '2px solid #e2e8f0', borderRadius: 10, overflow: 'hidden' }}>
             {/* ヘッダー */}
             <div style={{
-              background: '#fff7ed', padding: '10px 16px',
+              background: '#f8fafc', padding: '10px 16px',
               display: 'flex', alignItems: 'center', gap: 10,
-              borderBottom: '1px solid #fed7aa',
+              borderBottom: '1px solid #e2e8f0',
             }}>
               <input
                 type="checkbox"
-                checked={checkedIds.size === pendingBuyback.length && pendingBuyback.length > 0}
+                checked={pendingInHistory.length > 0 && checkedIds.size === pendingInHistory.length}
+                ref={el => {
+                  if (el) el.indeterminate = checkedIds.size > 0 && checkedIds.size < pendingInHistory.length
+                }}
                 onChange={toggleAll}
                 style={{ width: 16, height: 16, cursor: 'pointer' }}
               />
-              <span style={{ fontSize: 14, fontWeight: 700, color: '#c2410c', flex: 1 }}>
-                取扱外リスト（{pendingBuyback.length}件）
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', flex: 1 }}>
+                スキャン履歴（{scanHistory.length}件）
               </span>
-              {checkedIds.size > 0 && (
-                <span style={{ fontSize: 12, color: '#f97316' }}>{checkedIds.size}件選択中</span>
+              {pendingBuyback.length > 0 && (
+                <span style={{ fontSize: 12, color: '#f97316', fontWeight: 600 }}>
+                  取扱外 {pendingBuyback.length}件
+                  {checkedIds.size > 0 ? ` / ${checkedIds.size}件選択中` : ''}
+                </span>
               )}
             </div>
 
-            {/* アイテム */}
-            {pendingBuyback.map(b => (
-              <div key={b.id} style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '10px 16px', borderBottom: '1px solid #fef3c7',
-              }}>
-                <input
-                  type="checkbox"
-                  checked={checkedIds.has(b.id)}
-                  onChange={() => toggleCheck(b.id)}
-                  style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {b.content_name ?? '—'}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>
-                    {b.product_no3} {b.title ? `/ ${b.title}` : ''}
-                  </div>
-                </div>
-                {b.used_price != null && (
-                  <div style={{ fontSize: 12, color: '#475569', whiteSpace: 'nowrap' }}>
-                    ¥{b.used_price.toLocaleString()}
-                  </div>
-                )}
-              </div>
-            ))}
+            {/* アイテム一覧 */}
+            {scanHistory.map((it, i) => {
+              const hasShelf = it.shelves.length > 0
+              const itemId = it.product_no3 ?? it.product_no ?? ''
+              const inPending = pendingIds.has(itemId)
+              const isChecked = checkedIds.has(itemId)
 
-            {/* ボタン */}
-            <div style={{ padding: '12px 16px', display: 'flex', gap: 10, background: '#fff7ed' }}>
-              <button
-                onClick={handleMove}
-                style={{
-                  flex: 1, padding: '10px 0', background: '#2563eb', color: '#fff',
-                  border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700,
-                  cursor: 'pointer', fontFamily: 'inherit',
-                }}
-              >
-                買戻し確認へ移動（{actionCount}件）
-              </button>
-              <button
-                onClick={handleClear}
-                style={{
-                  padding: '10px 16px', background: '#fff', color: '#94a3b8',
-                  border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13,
-                  cursor: 'pointer', fontFamily: 'inherit',
-                }}
-              >
-                クリア（{actionCount}件）
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* スキャン履歴 */}
-        {history.length > 0 && (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8, fontWeight: 600 }}>最近のスキャン</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {history.map((h, i) => (
+              return (
                 <div key={i} style={{
-                  padding: '5px 12px', borderRadius: 20, fontSize: 12,
-                  background:
-                    h.status === 'found'    ? '#dcfce7' :
-                    h.status === 'no_shelf' ? '#fff7ed' : '#fee2e2',
-                  color:
-                    h.status === 'found'    ? '#15803d' :
-                    h.status === 'no_shelf' ? '#c2410c' : '#b91c1c',
-                  fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 16px', borderBottom: '1px solid #f1f5f9',
+                  opacity: !hasShelf && !inPending ? 0.45 : 1,
                 }}>
-                  {h.shelfNo != null ? `棚${h.shelfNo}` : h.status === 'not_found' ? '×' : '棚?'}
-                  <span style={{ fontWeight: 400, opacity: 0.8 }}>
-                    {h.label.length > 10 ? h.label.slice(0, 10) + '…' : h.label}
-                  </span>
+                  {!hasShelf && inPending ? (
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleCheck(itemId)}
+                      style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
+                    />
+                  ) : (
+                    <div style={{ width: 16, flexShrink: 0 }} />
+                  )}
+                  <div style={{
+                    minWidth: 52, height: 52, borderRadius: 8,
+                    background: hasShelf ? '#dcfce7' : '#fff7ed',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: hasShelf ? 20 : 12, fontWeight: 900,
+                    color: hasShelf ? '#15803d' : '#c2410c',
+                    flexShrink: 0,
+                  }}>
+                    {hasShelf ? it.shelves[0].shelf_no : '棚?'}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {getContentName(it)}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>
+                      {it.product_no3}
+                      {it.branch_no != null ? ` 枝番:${it.branch_no}` : ''}
+                      {it.title ? ` / ${it.title}` : ''}
+                    </div>
+                    {!hasShelf && !inPending && (
+                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>移動済み・クリア済み</div>
+                    )}
+                  </div>
+                  {it.used_price != null && (
+                    <div style={{ fontSize: 12, color: '#475569', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      ¥{it.used_price.toLocaleString()}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+              )
+            })}
+
+            {/* 買戻しアクションボタン（取扱外がある場合のみ） */}
+            {pendingBuyback.length > 0 && (
+              <div style={{ padding: '12px 16px', display: 'flex', gap: 10, background: '#fff7ed', borderTop: '1px solid #fed7aa' }}>
+                <button
+                  onClick={handleMove}
+                  style={{
+                    flex: 1, padding: '10px 0', background: '#2563eb', color: '#fff',
+                    border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  買戻し確認へ移動（{actionCount}件）
+                </button>
+                <button
+                  onClick={handleClear}
+                  style={{
+                    padding: '10px 16px', background: '#fff', color: '#94a3b8',
+                    border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  クリア（{actionCount}件）
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
