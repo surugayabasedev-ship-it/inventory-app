@@ -294,22 +294,6 @@ export function SortingView({ storeId, pendingBuyback, onAddBuyback, onMoveBuyba
                         <div style={{ fontSize: 12, color: '#f97316', marginTop: 2 }}>棚未設定</div>
                       )}
                     </div>
-                    {it.shelves.length === 0 && (
-                      pendingIds.has(it.product_no3 ?? it.product_no ?? '') ? (
-                        <div style={{ fontSize: 12, color: '#f97316', fontWeight: 600, whiteSpace: 'nowrap' }}>✔ 追加済み</div>
-                      ) : (
-                        <button
-                          onClick={() => addToBuyback(it)}
-                          style={{
-                            padding: '6px 12px', background: '#fff7ed', color: '#f97316',
-                            border: '1px solid #fed7aa', borderRadius: 6, fontSize: 12,
-                            fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
-                          }}
-                        >
-                          取扱外追加
-                        </button>
-                      )
-                    )}
                   </div>
                 ))}
               </>
