@@ -95,6 +95,8 @@ export function ShelvesAdmin({ storeId, storeName, storeCode }: Props) {
   const [mapSearch, setMapSearch] = useState('')
   const [undoItem, setUndoItem] = useState<ShelfContent | null>(null)
   const [undoProgress, setUndoProgress] = useState(0)
+  const [showUnassigned, setShowUnassigned] = useState(true)
+  const [unassignedFilter, setUnassignedFilter] = useState('')
 
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const undoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -314,6 +316,16 @@ export function ShelvesAdmin({ storeId, storeName, storeCode }: Props) {
     }
   }
 
+  // is_active=true でどの棚にも紐付いていないコンテンツ
+  const assignedContentIds = new Set<string>()
+  for (const scs of scMap.values()) {
+    for (const sc of scs) { if (sc.content_id) assignedContentIds.add(sc.content_id) }
+  }
+  const unassignedContents = allContents.filter(c => !assignedContentIds.has(c.id))
+  const unassignedFiltered = unassignedFilter.trim()
+    ? unassignedContents.filter(c => c.content_name.includes(unassignedFilter.trim()) || (c.area ?? '').includes(unassignedFilter.trim()))
+    : unassignedContents
+
   const mapSearchTrimmed = mapSearch.trim()
   const matchedShelfIds = useCallback(() => {
     if (!mapSearchTrimmed) return new Set<string>()
@@ -358,6 +370,71 @@ export function ShelvesAdmin({ storeId, storeName, storeCode }: Props) {
             <button onClick={exportXlsx} style={btn('#2563eb')}>Excelエクスポート</button>
           </div>
         </div>
+
+        {/* 棚未設定コンテンツ パネル */}
+        {unassignedContents.length > 0 && (
+          <div style={{ background: '#fff', border: '1.5px solid #fbbf24', borderRadius: 8, flexShrink: 0 }}>
+            <button
+              onClick={() => setShowUnassigned(v => !v)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: '"Noto Sans JP",sans-serif', textAlign: 'left' }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#92400e', flex: 1 }}>
+                ⚠ 棚未設定コンテンツ（取扱中）
+              </span>
+              <span style={{ background: '#f59e0b', color: '#fff', borderRadius: 10, fontSize: 12, padding: '1px 8px', fontWeight: 700 }}>
+                {unassignedContents.length}件
+              </span>
+              <span style={{ fontSize: 12, color: '#94a3b8' }}>{showUnassigned ? '▲' : '▼'}</span>
+            </button>
+
+            {showUnassigned && (
+              <div style={{ padding: '0 16px 14px', borderTop: '1px solid #fef3c7' }}>
+                <p style={{ fontSize: 12, color: '#78350f', margin: '10px 0 10px', lineHeight: 1.6 }}>
+                  コンテンツ管理で取扱中に設定されているが、棚に割り当てられていないコンテンツです。<br />
+                  クリックするとコンテンツ追加フォームに自動セットされます（棚を先に選択してください）。
+                </p>
+                <input
+                  value={unassignedFilter}
+                  onChange={e => setUnassignedFilter(e.target.value)}
+                  placeholder="コンテンツ名・エリアで絞り込み..."
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12, fontFamily: '"Noto Sans JP",sans-serif', marginBottom: 10 }}
+                />
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflowY: 'auto' }}>
+                  {unassignedFiltered.map(c => {
+                    const ac = c.area ? AREA_COLORS[c.area] : null
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => {
+                          setSelectedAddContent(c)
+                          setAddCatchAll(false)
+                          setContentSearch('')
+                        }}
+                        title={`クリックでコンテンツ追加フォームにセット${selected ? '' : '（先に棚を選択）'}`}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          padding: '4px 10px', borderRadius: 20, border: '1px solid',
+                          borderColor: ac?.bd ?? '#cbd5e1',
+                          background: ac?.bg ?? '#f1f5f9',
+                          color: ac?.tx ?? '#475569',
+                          fontSize: 12, cursor: 'pointer', fontFamily: '"Noto Sans JP",sans-serif',
+                          fontWeight: selectedAddContent?.id === c.id ? 700 : 400,
+                          boxShadow: selectedAddContent?.id === c.id ? `0 0 0 2px ${ac?.bd ?? '#94a3b8'}` : undefined,
+                        }}
+                      >
+                        {c.content_name}
+                        {c.area && <span style={{ fontSize: 10, opacity: 0.75 }}>({c.area.replace('キャラクターグッズ', 'キャラ').replace('ぬいぐるみ', 'ぬい').replace('フィギュア', 'フィギュア')})</span>}
+                      </button>
+                    )
+                  })}
+                  {unassignedFiltered.length === 0 && (
+                    <span style={{ fontSize: 12, color: '#94a3b8' }}>該当なし</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* メイン */}
         <div style={{ display:'flex', gap:16, flex:1, overflow:'hidden' }}>
